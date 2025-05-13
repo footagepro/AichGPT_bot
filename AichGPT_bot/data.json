@@ -1,1 +1,9 @@
-{}
+{
+  "global": {
+    "requests": 0,
+    "tokens": 0,
+    "images": 0,
+    "premium_tokens": 0,
+    "whisper_seconds": 0
+  }
+}
