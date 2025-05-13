@@ -1086,7 +1086,7 @@ def process_announcement_confirmation_step(message, recepients_list, announcemen
     if len(recepients_list) == 1 and recepients_list[0] < 0:
         try:
             bot.send_message(recepients_list[0], announcement_text, parse_mode="HTML")
-            admin_log = f✉️ Сообщение отправлено в чат {recepients_list[0]}"
+            admin_log = f"✉️ Сообщение отправлено в чат {recepients_list[0]}"
         except Exception as e:
             admin_log = f"❌ Ошибка: чат {recepients_list[0]} не найден"
         bot.send_message(ADMIN_ID, admin_log)
