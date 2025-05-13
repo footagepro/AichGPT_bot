@@ -1,0 +1,18 @@
+.env
+data.json
+data-backup.json
+data-legacy.json
+todo.py
+chat_context/
+
+# PyCharm project files
+.idea/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Other
+*.log
+*.sqlite
