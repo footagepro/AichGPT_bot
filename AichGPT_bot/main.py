@@ -1246,10 +1246,10 @@ def handle_topup_command(message):
 def handle_pay_command(message):
     user_id = message.from_user.id
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("💎 ПРЕМИУМ (GPT-4o)", callback_data="pay_premium"))
-    markup.add(InlineKeyboardButton("🎨 IMG (Изображения)", callback_data="pay_img"))
-    markup.add(InlineKeyboardButton("🔥 ALL-in (GPT-4o + IMG)", callback_data="pay_allin"))
-    markup.add(InlineKeyboardButton("👑 MillionAIR", callback_data="pay_million"))
+    markup.add(InlineKeyboardButton("💎 ПРЕМИУМ (GPT-4o)", callback_data=f"pay_premium${user_id}"))
+    markup.add(InlineKeyboardButton("🎨 IMG (Изображения)", callback_data=f"pay_img${user_id}"))
+    markup.add(InlineKeyboardButton("🔥 ALL-in (GPT-4o + IMG)", callback_data=f"pay_allin${user_id}"))
+    markup.add(InlineKeyboardButton("👑 MillionAIR", callback_data=f"pay_million${user_id}"))
     bot.send_message(user_id, "Выбери категорию токенов:", reply_markup=markup)
 
 # Define the handler for the /stats command
@@ -1535,7 +1535,8 @@ user_payment_choice = {}
 @bot.callback_query_handler(func=lambda call: call.data.startswith("pay_"))
 def handle_payment_category(call):
     user_id = call.from_user.id
-    category = call.data.split("_")[1]
+    category = call.data.split("_")[1]  # pay_premium → premium
+
     user_payment_choice[user_id] = {"category": category}
 
     markup = InlineKeyboardMarkup()
