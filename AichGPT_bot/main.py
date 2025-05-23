@@ -1534,8 +1534,12 @@ user_payment_choice = {}
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("pay_"))
 def handle_payment_category(call):
-    user_id = call.from_user.id
-    category = call.data.split("_")[1]  # pay_premium → premium
+    try:
+        category, user_id_str = call.data.replace("pay_", "").split("$")
+        user_id = int(user_id_str)
+    except ValueError:
+        bot.answer_callback_query(call.id, "❗ Ошибка данных. Попробуй снова через /pay", show_alert=True)
+        return
 
     user_payment_choice[user_id] = {"category": category}
 
