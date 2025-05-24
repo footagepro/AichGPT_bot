@@ -13,7 +13,6 @@ import time
 from pydub import AudioSegment
 from telebot.util import extract_arguments, extract_command
 from telebot import types
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import base64
 import requests
 
@@ -1241,16 +1240,6 @@ def handle_topup_command(message):
     else:
         bot.reply_to(message, "Вы не зарегистрированы в системе. Напишите /start")
 
-# Команда /pay — запуск витрины оплаты
-@bot.message_handler(commands=["pay", "оплатить"])
-def handle_pay_command(message):
-    user_id = message.from_user.id
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("💎 ПРЕМИУМ (GPT-4o)", callback_data=f"pay_premium${user_id}"))
-    markup.add(InlineKeyboardButton("🎨 IMG (Изображения)", callback_data=f"pay_img${user_id}"))
-    markup.add(InlineKeyboardButton("🔥 ALL-in (GPT-4o + IMG)", callback_data=f"pay_allin${user_id}"))
-    markup.add(InlineKeyboardButton("👑 MillionAIR", callback_data=f"pay_million${user_id}"))
-    bot.send_message(user_id, "Выбери категорию токенов:", reply_markup=markup)
 
 # Define the handler for the /stats command
 @bot.message_handler(commands=["stats", "profile"])
@@ -1530,113 +1519,6 @@ def handle_favor_callback(call):
     else:
         bot.answer_callback_query(call.id, "Что-то пошло не так...\n\ncallback_data: " + call.data, True)
 
-user_payment_choice = {}
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("pay_"))
-def handle_payment_category(call):
-    try:
-        category, user_id_str = call.data.replace("pay_", "").split("$")
-        user_id = int(user_id_str)
-    except ValueError:
-        bot.answer_callback_query(call.id, "❗ Ошибка данных. Попробуй снова через /pay", show_alert=True)
-        return
-
-    user_payment_choice[user_id] = {"category": category}
-
-    markup = InlineKeyboardMarkup()
-    if category in ["premium", "img"]:
-        markup.add(
-            InlineKeyboardButton("1000 токенов = 100 ₽", callback_data="amount_100"),
-            InlineKeyboardButton("10000 токенов = 500 ₽", callback_data="amount_500"),
-            InlineKeyboardButton("100000 токенов = 1000 ₽", callback_data="amount_1000")
-        )
-    elif category == "allin":
-        markup.add(
-            InlineKeyboardButton("1000+1000 токенов = 150 ₽", callback_data="amount_150"),
-            InlineKeyboardButton("10000+10000 токенов = 850 ₽", callback_data="amount_850"),
-            InlineKeyboardButton("100000+100000 токенов = 1800 ₽", callback_data="amount_1800")
-        )
-    elif category == "million":
-        markup.add(
-            InlineKeyboardButton("1М+1М токенов = 5000 ₽", callback_data="amount_5000")
-        )
-
-    markup.add(InlineKeyboardButton("🔙 Назад к тарифам", callback_data="pay_back"))
-    bot.edit_message_text("Выбери сумму:", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=markup)
-
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("amount_"))
-def handle_amount_selection(call):
-    user_id = call.from_user.id
-    amount_rub = int(call.data.split("_")[1])
-    user_payment_choice[user_id]["amount_rub"] = amount_rub
-
-    payment_links = {
-        100: "https://yoomoney.ru/to/4100116905374789/100",
-        500: "https://yoomoney.ru/to/4100116905374789/500",
-        1000: "https://yoomoney.ru/to/4100116905374789/1000",
-        150: "https://yoomoney.ru/to/4100116905374789/150",
-        850: "https://yoomoney.ru/to/4100116905374789/850",
-        1800: "https://yoomoney.ru/to/4100116905374789/1800",
-        5000: "https://yoomoney.ru/to/4100116905374789/5000"
-    }
-
-    link = payment_links.get(amount_rub, "https://yoomoney.ru/to/4100116905374789")
-
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("💳 Перейти к оплате", url=link))
-    markup.add(InlineKeyboardButton("✅ Я оплатил", callback_data="confirm_paid"))
-    markup.add(InlineKeyboardButton("❌ Не оплатил", callback_data="not_paid"))
-
-    bot.edit_message_text(f"Сумма: {amount_rub} ₽\nНажми кнопку ниже для оплаты:", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=markup)
-
-
-@bot.callback_query_handler(func=lambda call: call.data == "confirm_paid")
-def handle_confirm_paid(call):
-    user_id = call.from_user.id
-    choice = user_payment_choice.get(user_id)
-
-    if not choice:
-        bot.send_message(user_id, "⚠️ Ошибка: Выбор не найден. Попробуйте снова /pay")
-        return
-
-    category = choice["category"]
-    amount_rub = choice["amount_rub"]
-
-    token_map = {
-        100: 1000, 500: 10000, 1000: 100000,
-        150: 1000, 850: 10000, 1800: 100000,
-        5000: 1000000
-    }
-    tokens = token_map.get(amount_rub, 0)
-
-    if category == "premium":
-        data[user_id]["premium_balance"] = data[user_id].get("premium_balance", 0) + tokens
-    elif category == "img":
-        data[user_id]["image_balance"] = data[user_id].get("image_balance", 0) + tokens
-    elif category == "allin":
-        data[user_id]["premium_balance"] = data[user_id].get("premium_balance", 0) + tokens
-        data[user_id]["image_balance"] = data[user_id].get("image_balance", 0) + tokens
-    elif category == "million":
-        data[user_id]["premium_balance"] = data[user_id].get("premium_balance", 0) + 1_000_000
-        data[user_id]["image_balance"] = data[user_id].get("image_balance", 0) + 1_000_000
-
-    update_json_file(data)
-
-    bot.send_message(user_id, f"✅ Оплата подтверждена! Токены зачислены 🎉\n\n"
-                              f"Премиум токены: {data[user_id].get('premium_balance', 0)}\n"
-                              f"Токены для генерации изображений: {data[user_id].get('image_balance', 0)}")
-
-
-@bot.callback_query_handler(func=lambda call: call.data == "not_paid")
-def handle_not_paid(call):
-    user_id = call.from_user.id
-    bot.send_message(user_id, "❗ Оплата не подтверждена. Вы можете снова выбрать тариф: /pay")
-
-
-@bot.callback_query_handler(func=lambda call: call.data == "pay_back")
-def handle_back_to_tariffs(call):
-    handle_pay_command(call)
 
 # Define the handler for the /imagine command to generate AI image from text via OpenAi
 @bot.message_handler(commands=["i", "img", "image", "imagine"])
