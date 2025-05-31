@@ -16,11 +16,108 @@ from telebot import types
 import base64
 import requests
 
+import threading
+import schedule
+import time
+from yookassa import Configuration, Payment, Webhook
+from flask import Flask, request, jsonify
+import hmac
+import hashlib
+from datetime import datetime, timedelta
+
+# ===================== PAYMENT INTEGRATION =====================
+PAYMENTS_FILE = "payments.json"
+payments = {}
+
+def load_payments():
+    if os.path.exists(PAYMENTS_FILE):
+        with open(PAYMENTS_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_payments():
+    with open(PAYMENTS_FILE, "w") as f:
+        json.dump(payments, f, indent=4)
+
+def run_webhook_server():
+    port = int(os.environ.get("PORT", 5000))
+    print(f"Starting webhook server on port {port}")
+    bot.send_message(ADMIN_ID, f"🌐 Webhook server started on port {port}")
+    app.run(host='0.0.0.0', port=port)
+
+def payment_check_scheduler():
+    schedule.every(10).minutes.do(check_pending_payments)
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
+
+def check_pending_payments():
+    for payment_id, payment_data in list(payments.items()):
+        if payment_data["status"] == "pending":
+            payment = Payment.find_one(payment_id)
+            if payment.status == "succeeded":
+                process_successful_payment(payment_id)
+
+def process_successful_payment(payment_id):
+    if payment_id not in payments:
+        print(f"Payment {payment_id} not found in local database")
+        return
+    
+    # Проверяем что пользователь существует
+    user_id = payment_data["user_id"]
+    if not is_user_exists(user_id):
+        print(f"User {user_id} not found for payment {payment_id}")
+        return
+    
+    if 'premium_tokens' in tariff:
+        if "premium_balance" not in data[user_id]:
+            data[user_id]["premium_balance"] = 0
+        data[user_id]["premium_balance"] += tariff["premium_tokens"]
+    
+    if 'images' in tariff:
+        if "image_balance" not in data[user_id]:
+            data[user_id]["image_balance"] = 0
+        data[user_id]["image_balance"] += tariff["images"]
+    
+    update_json_file(data)
+    payments[payment_id]["status"] = "completed"
+    save_payments()
+    
+    bot.send_message(user_id, f"✅ Оплата прошла успешно! Баланс пополнен по тарифу {tariff['name']}")
+
+# Flask app for webhooks
+app = Flask(__name__)
+
+@app.route('/health')
+def health_check():
+    return jsonify({"status": "ok"}), 200
+
+@app.route('/webhook', methods=['POST'])
+def webhook_handler():
+    event_json = request.json
+    try:
+        # Verify signature
+        signature = request.headers.get('Yookassa-Signature')
+        secret_key = os.getenv("WEBHOOK_SECRET_KEY").encode('utf-8')
+        digest = hmac.new(secret_key, request.data, hashlib.sha256).hexdigest()
+        
+        if signature != digest:
+            print("Invalid signature")
+            return jsonify({"status": "invalid signature"}), 403
+        
+        payment = event_json['object']
+        if event_json['event'] == 'payment.succeeded':
+            process_successful_payment(payment['id'])
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        print(f"Webhook error: {e}")
+        return jsonify({"status": "error"}), 400
+# ================== END PAYMENT INTEGRATION ==================
 
 DEFAULT_MODEL = "gpt-3.5-turbo-0125"  # 16k
 PREMIUM_MODEL = "gpt-4o"  # 128k tokens context window
 MAX_REQUEST_TOKENS = 4000  # max output tokens for one request (not including input tokens)
-DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant named Бот."
+DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant named Alexa."
 
 # Актуальные цены можно взять с сайта https://openai.com/pricing
 PRICE_1K = 0.0015  # price per 1k tokens in USD
@@ -52,6 +149,23 @@ bot = telebot.TeleBot(os.getenv("TELEGRAM_API_KEY"))
 # Получаем айди админа, которому в лс будут приходить логи
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
+# Платежные тарифы
+TARIFFS = {
+    "premium_1k": {"name": "ПРЕМИУМ-1К", "price": 100, "premium_tokens": 1000},
+    "premium_10k": {"name": "ПРЕМИУМ-10К", "price": 500, "premium_tokens": 10000},
+    "premium_100k": {"name": "ПРЕМИУМ-100К", "price": 1000, "premium_tokens": 100000},
+    "img_1k": {"name": "IMG-1К", "price": 100, "images": 10},
+    "img_10k": {"name": "IMG-10К", "price": 500, "images": 100},
+    "img_100k": {"name": "IMG-100К", "price": 1000, "images": 1000},
+    "allin_1k": {"name": "Allin-1K", "price": 150, "premium_tokens": 1000, "images": 10},
+    "allin_10k": {"name": "Allin-10K", "price": 850, "premium_tokens": 10000, "images": 100},
+    "allin_100k": {"name": "Allin-100K", "price": 1800, "premium_tokens": 100000, "images": 1000},
+    "millionair": {"name": "MillionAir", "price": 5000, "premium_tokens": 1000000, "images": 1000}
+}
+
+# Настройка ЮKassa
+Configuration.account_id = os.getenv("YOOKASSA_SHOP_ID")
+Configuration.secret_key = os.getenv("YOOKASSA_SECRET_KEY")
 
 # File with users and global token usage data
 DATAFILE = "data.json"
@@ -126,6 +240,18 @@ def get_user_prompt(user_id: int) -> str:
     else:
         return str(data[user_id]["prompt"])
 
+# Запуск фоновых процессов
+if not os.environ.get("WEBHOOK_STARTED"):
+    # Создаем и запускаем поток для вебхука
+    webhook_thread = threading.Thread(target=run_webhook_server, daemon=True)
+    webhook_thread.start()
+    os.environ["WEBHOOK_STARTED"] = "1"
+    time.sleep(1)  # Даем время на запуск
+
+if not os.environ.get("PAYMENT_CHECKER_STARTED"):
+    payment_thread = threading.Thread(target=payment_check_scheduler, daemon=True)
+    payment_thread.start()
+    os.environ["PAYMENT_CHECKER_STARTED"] = "1"
 
 """БЕТА версия расширенного контекста"""
 
@@ -604,6 +730,17 @@ def convert_voice_message_to_text(message: telebot.types.Message) -> str:
 
 """========================SETUP========================="""
 
+
+# Load payments data
+payments = load_payments()
+
+# Проверка наличия платежных ключей
+if not os.getenv("YOOKASSA_SHOP_ID") or not os.getenv("YOOKASSA_SECRET_KEY"):
+    print("⚠️ Внимание: платежные ключи ЮKassa не настроены!")
+    try:
+        bot.send_message(ADMIN_ID, "⚠️ Платежные ключи ЮKassa не настроены! Оплата не будет работать")
+    except:
+        pass  # На случай если бот еще не инициализирован
 
 # Check if the file exists
 if os.path.isfile(DATAFILE):
@@ -1161,6 +1298,26 @@ def handle_start_command(message):
     print(new_referral_string + new_user_log)
     bot.send_message(ADMIN_ID, new_referral_string + new_user_log)
 
+@bot.message_handler(commands=["buy", "topup"])
+def handle_buy_command(message):
+    if message.chat.type != "private":
+        bot.reply_to(message, "ℹ️ Покупки доступны только в личном чате с ботом")
+        return
+    
+    if is_user_blacklisted(user_id):
+        return
+    
+    if not is_user_exists(user_id):
+        bot.reply_to(message, "Вы не зарегистрированы. Напишите /start")
+        return
+
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for tariff_key, tariff_info in TARIFFS.items():
+        button_text = f"{tariff_info['name']} - {tariff_info['price']} руб."
+        markup.add(types.InlineKeyboardButton(button_text, callback_data=f"tariff_{tariff_key}"))
+    
+    bot.send_message(user_id, "💳 Выберите тариф для пополнения баланса:", reply_markup=markup)
+
 
 # Define the handler for the /help command
 @bot.message_handler(commands=["help"])
@@ -1459,11 +1616,44 @@ def handle_extended_context_command(message):
 # Favor callback data handler
 @bot.callback_query_handler(func=lambda call: True)
 def handle_favor_callback(call):
-    call_data_list: list = call.data.split("$")
+    # Обработка выбора тарифа
+    if call.data.startswith('tariff_'):
+        user_id = call.from_user.id
+        tariff_key = call.data.split('_')[1]
+        
+        if tariff_key not in TARIFFS:
+            bot.answer_callback_query(call.id, "Неверный тариф")
+            return
 
+        tariff = TARIFFS[tariff_key]
+        payment = Payment.create({
+            "amount": {"value": tariff["price"], "currency": "RUB"},
+            "confirmation": {"type": "redirect", "return_url": f"https://t.me/{bot.get_me().username}"},
+            "description": f"Покупка: {tariff['name']}",
+            "capture": True,
+            "metadata": {"user_id": user_id, "tariff": tariff_key}
+        })
+        
+        payments[payment.id] = {
+            "user_id": user_id,
+            "tariff": tariff_key,
+            "status": "pending"
+        }
+        save_payments()
+        
+        bot.send_message(
+            user_id, 
+            f"🛒 Для оплаты тарифа {tariff['name']} перейдите по ссылке:\n{payment.confirmation.confirmation_url}"
+        )
+        bot.answer_callback_query(call.id)
+        return  # Выходим после обработки тарифа
+
+    # Обработка favor (только для админа)
     if call.from_user.id != ADMIN_ID:
         return
-    elif len(call_data_list) != 2:
+        
+    call_data_list = call.data.split("$")
+    if len(call_data_list) != 2:
         bot.answer_callback_query(call.id, "Должно быть два аргумента!\n\ncallback_data: " + call.data, True)
         return
     elif not call_data_list[1].isdigit():
@@ -1863,9 +2053,27 @@ def handle_pinned_message(message):
 
 if __name__ == '__main__':
     print("---работаем---")
+    
+    # Уведомление админа о запуске
+    try:
+        bot.send_message(ADMIN_ID, "🤖 Бот запущен и готов к работе!")
+    except Exception as e:
+        print(f"Ошибка отправки уведомления админу: {e}")
+    
+    # Запуск планировщика проверки платежей
+    if not os.environ.get("PAYMENT_CHECKER_STARTED"):
+        payment_thread = threading.Thread(target=payment_check_scheduler, daemon=True)
+        payment_thread.start()
+        os.environ["PAYMENT_CHECKER_STARTED"] = "1"
+        time.sleep(1)  # Короткая задержка для инициализации
+    
+    # Основной цикл бота
     bot.infinity_polling()
-
-    # Делаем бэкап бд и уведомляем админа об успешном завершении работы
+    
+    # Завершение работы
     update_json_file(data, BACKUPFILE)
-    bot.send_message(ADMIN_ID, "Бот остановлен")
+    try:
+        bot.send_message(ADMIN_ID, "Бот остановлен")
+    except:
+        pass  # Игнорируем ошибки при остановке
     print("\n---работа завершена---")
