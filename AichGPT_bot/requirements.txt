@@ -1,6 +1,8 @@
+schedule
+python-dotenv
 pyTelegramBotAPI
 openai
-python-dotenv
+yookassa
+Flask
 pydub
 requests
-schedule
