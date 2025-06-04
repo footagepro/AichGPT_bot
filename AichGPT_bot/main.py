@@ -241,17 +241,23 @@ def get_user_prompt(user_id: int) -> str:
         return str(data[user_id]["prompt"])
 
 # Запуск фоновых процессов
-if not os.environ.get("WEBHOOK_STARTED"):
-    # Создаем и запускаем поток для вебхука
+webhook_thread = threading.Thread(target=run_webhook_server, daemon=True)
+webhook_thread.start()
+os.environ["WEBHOOK_STARTED"] = "1"
+time.sleep(1)  # Даем время на запуск
+
+payment_thread = threading.Thread(target=payment_check_scheduler, daemon=True)
+payment_thread.start()
+os.environ["PAYMENT_CHECKER_STARTED"] = "1"
+
+try:
     webhook_thread = threading.Thread(target=run_webhook_server, daemon=True)
     webhook_thread.start()
-    os.environ["WEBHOOK_STARTED"] = "1"
-    time.sleep(1)  # Даем время на запуск
-
-if not os.environ.get("PAYMENT_CHECKER_STARTED"):
     payment_thread = threading.Thread(target=payment_check_scheduler, daemon=True)
     payment_thread.start()
-    os.environ["PAYMENT_CHECKER_STARTED"] = "1"
+except Exception as e:
+    print(f"Ошибка при запуске потоков: {e}")
+    bot.send_message(ADMIN_ID, f"🚨 Critical error: {str(e)}")
 
 """БЕТА версия расширенного контекста"""
 
@@ -1300,6 +1306,8 @@ def handle_start_command(message):
 
 @bot.message_handler(commands=["buy", "topup"])
 def handle_buy_command(message):
+    user_id = message.from_user.id  # Получаем user_id из сообщения
+
     if message.chat.type != "private":
         bot.reply_to(message, "ℹ️ Покупки доступны только в личном чате с ботом")
         return
@@ -1311,6 +1319,7 @@ def handle_buy_command(message):
         bot.reply_to(message, "Вы не зарегистрированы. Напишите /start")
         return
 
+    # Остальной код без изменений
     markup = types.InlineKeyboardMarkup(row_width=1)
     for tariff_key, tariff_info in TARIFFS.items():
         button_text = f"{tariff_info['name']} - {tariff_info['price']} руб."
@@ -2049,31 +2058,38 @@ def handle_pinned_message(message):
 
     # Удаляем системное сообщение о закрепе
     bot.delete_message(message.chat.id, message.message_id)
-
-
-if __name__ == '__main__':
+    
+    if __name__ == '__main__':
     print("---работаем---")
     
-    # Уведомление админа о запуске
     try:
+        # Уведомление админа о запуске
         bot.send_message(ADMIN_ID, "🤖 Бот запущен и готов к работе!")
     except Exception as e:
         print(f"Ошибка отправки уведомления админу: {e}")
     
     # Запуск планировщика проверки платежей
-    if not os.environ.get("PAYMENT_CHECKER_STARTED"):
+    try:
         payment_thread = threading.Thread(target=payment_check_scheduler, daemon=True)
         payment_thread.start()
-        os.environ["PAYMENT_CHECKER_STARTED"] = "1"
-        time.sleep(1)  # Короткая задержка для инициализации
+        webhook_thread = threading.Thread(target=run_webhook_server, daemon=True)
+        webhook_thread.start()
+    except Exception as e:
+        print(f"Ошибка при запуске потоков: {e}")
+        bot.send_message(ADMIN_ID, f"🚨 Ошибка запуска потоков: {str(e)}")
     
-    # Основной цикл бота
-    bot.infinity_polling()
-    
-    # Завершение работы
-    update_json_file(data, BACKUPFILE)
     try:
-        bot.send_message(ADMIN_ID, "Бот остановлен")
-    except:
-        pass  # Игнорируем ошибки при остановке
-    print("\n---работа завершена---")
+        # Основной цикл бота
+        bot.infinity_polling()
+    except Exception as e:
+        error_msg = f"🚨 Critical error: {str(e)}"
+        print(error_msg)
+        bot.send_message(ADMIN_ID, error_msg)
+    finally:
+        # Сохранение данных при завершении
+        update_json_file(data, BACKUPFILE)
+        print("\n---работа завершена---")
+        try:
+            bot.send_message(ADMIN_ID, "Бот остановлен")
+        except:
+            pass
