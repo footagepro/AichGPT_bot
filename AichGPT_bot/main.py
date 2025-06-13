@@ -20,7 +20,7 @@ import requests
 DEFAULT_MODEL = "gpt-3.5-turbo-0125"  # 16k
 PREMIUM_MODEL = "gpt-4o"  # 128k tokens context window
 MAX_REQUEST_TOKENS = 4000  # max output tokens for one request (not including input tokens)
-DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant named Бот."
+DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant named Алекса."
 
 # Актуальные цены можно взять с сайта https://openai.com/pricing
 PRICE_1K = 0.0015  # price per 1k tokens in USD
@@ -1125,7 +1125,7 @@ def handle_start_command(message):
 
     # Если юзер уже есть в базе, то просто здороваемся и выходим, иначе проверяем рефералку и добавляем его в базу
     if is_user_exists(user.id):
-        bot.send_message(message.chat.id, "Бот готов к работе 💪💅")  # мб выдавать случайное приветствие
+        bot.send_message(message.chat.id, "Магдыч готов к работе 💪💅")  # мб выдавать случайное приветствие
         return
 
     welcome_string = f"{user.first_name}, с подключением 🤝\n\n" \
